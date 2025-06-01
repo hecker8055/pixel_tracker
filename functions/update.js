@@ -1,68 +1,81 @@
 import { NhostClient } from "@nhost/nhost-js";
 
+const accessToken = process.env.NHOST_ADMIN_SECRET;
 const backendUrl = process.env.NHOST_BACKEND_URL;
-const nhost = new NhostClient({ backendUrl });
+
+const nhost = new NhostClient({
+  backendUrl: backendUrl,
+});
+
+nhost.graphql.setAccessToken(accessToken);
+console.log("accessToken", accessToken);
+
 
 export default async (req, res) => {
-  try {
-    // Extract imgId from query params
-    const imgId = req.query.text;
-    console.log("imgId", imgId);
+  // get the data from the request
+  const imgText = req.query.text;
+  console.log("imgText", imgText);
 
-    if (!imgId) {
-      return res.status(400).json({ error: "No image token provided" });
+  if (!imgText) {
+    return res.status(500).json({ error: "No image token provided" });
+  }
+
+  // make a get query to get email id using imgText
+  const GET_EMAIL_ID = `
+  query getId($text: String!) {
+    emails(where: {img_text: {_eq: $text}}) {
+      id
+      seen
     }
+  }`;
 
-    // Define GraphQL queries
-    const GET_ID = `
-      query GetTrackerId($id: String!) {
-        Tracker(where: { img_id: { _eq: $id } }) {
-          id
-        }
+  // update query with the email id
+  const UPDATE_QUERY = `
+    mutation UpdateEmail($id: uuid!, $date: timestamptz!) {
+      update_emails(where: {id: {_eq: $id}}, _set: {seen: true, seen_at: $date}) {
+        affected_rows
       }
-    `;
+    }`;
 
-    const UPDATE_QUERY = `
-      mutation UpdateSeenDate($id: Int!, $date: timestamptz!) {
-        update_Tracker(
-          where: { id: { _eq: $id } }
-          _set: { seen_at: $date }
-        ) {
-          affected_rows
-        }
-      }
-    `;
-
-    // Step 1: Fetch tracker ID
-    const { data, error } = await nhost.graphql.request(GET_ID, {
-      id: imgId, // Correct variable name
+  try {
+    const { data, error } = await nhost.graphql.request(GET_EMAIL_ID, {
+      text: imgText,
+      
     });
+
+    console.log("Fetched data:", data);
 
     if (error) {
       return res.status(500).json({ error: error.message });
     }
 
-    if (!data?.Tracker?.length) {
-      return res.status(404).json({ error: "No matching record found" });
+    if (!data) {
+      return res.status(500).json({ error: "No email found" });
     }
 
-    const trackerId = data.Tracker[0].id;
+    // extract the email id from the response
+    const emailId = data.emails[0].id;
+    const seen = data.emails[0].seen;
 
-    // Step 2: Update seen_at timestamp
-    const { data: updatedData, error: updateError } =
-      await nhost.graphql.request(UPDATE_QUERY, {
-        id: trackerId,
-        date: new Date().toISOString(), // Ensure ISO format
-      });
+    if (seen) {
+      return res.status(500).json({ error: "Kaam hogaya vai" });
+    }
+
+    //update the seen column in emails table
+    const { data: updatedData, error: updateError } = await nhost.graphql.request(UPDATE_QUERY, {
+  id: emailId,
+  date: new Date().toISOString(),
+});
+      console.log("Update result:", updatedData);
+console.log("Update error:", updateError)
 
     if (updateError) {
-      return res.status(500).json({ error: updateError.message }); // Fixed variable
+      return res.status(500).json({ error: error.message });
     }
 
-    // Success response
-    res.status(200).json({ success: true, updatedData });
+    res.status(404).send({ error: "Bye bye" });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Internal server error" });
+    console.log(error);
+    res.status(500).json({ error });
   }
 };
